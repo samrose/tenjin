@@ -10,11 +10,14 @@ defmodule Tenjin.Schema do
       defmodule MyApp.Schema do
         use Tenjin.Schema
 
+        # Users table with authentication and RLS
         table "users" do
           field :id, :uuid, primary_key: true, default: "gen_random_uuid()"
           field :email, :text, unique: true, null: false
           field :name, :text
+          field :avatar_url, :text
           field :created_at, :timestamptz, default: "now()"
+          field :updated_at, :timestamptz, default: "now()"
 
           enable_rls()
 
@@ -22,7 +25,36 @@ defmodule Tenjin.Schema do
             "auth.uid() = id"
           end
 
-          has_many :posts, foreign_key: :author_id
+          policy :update, "Users can update their own profile" do
+            "auth.uid() = id"
+          end
+
+          index [:email], unique: true
+          index [:created_at]
+        end
+
+        # Blog posts table
+        table "posts" do
+          field :id, :uuid, primary_key: true, default: "gen_random_uuid()"
+          field :title, :text, null: false
+          field :slug, :text, unique: true, null: false
+          field :content, :text
+          field :author_id, :uuid, references: "users(id)", on_delete: :cascade
+          field :published, :boolean, default: false
+          field :created_at, :timestamptz, default: "now()"
+
+          enable_rls()
+
+          policy :select, "Published posts are viewable by all" do
+            "published = true"
+          end
+
+          policy :insert, "Authenticated users can create posts" do
+            "auth.uid() = author_id"
+          end
+
+          index [:author_id]
+          index [:published, :created_at]
         end
       end
   """

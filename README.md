@@ -85,6 +85,7 @@ Define your database schema using Tenjin's expressive Elixir DSL:
 defmodule MyBlog.Schema do
   use Tenjin.Schema
 
+  # Users table with authentication and RLS
   table "users" do
     field :id, :uuid, primary_key: true, default: "gen_random_uuid()"
     field :email, :text, unique: true, null: false
@@ -92,122 +93,131 @@ defmodule MyBlog.Schema do
     field :avatar_url, :text
     field :created_at, :timestamptz, default: "now()"
     field :updated_at, :timestamptz, default: "now()"
-    
+
     enable_rls()
-    
+
     policy :select, "Users can view their own profile" do
       "auth.uid() = id"
     end
-    
+
     policy :update, "Users can update their own profile" do
       "auth.uid() = id"
     end
-    
+
     index [:email], unique: true
     index [:created_at]
-    
-    trigger :update_updated_at, on: :update do
-      "updated_at = now()"
-    end
-    
-    has_many :posts, foreign_key: :author_id
   end
 
+  # Blog posts table
   table "posts" do
     field :id, :uuid, primary_key: true, default: "gen_random_uuid()"
     field :title, :text, null: false
+    field :slug, :text, unique: true, null: false
     field :content, :text
     field :excerpt, :text
-    field :slug, :text, unique: true
     field :author_id, :uuid, references: "users(id)", on_delete: :cascade
     field :published, :boolean, default: false
     field :published_at, :timestamptz
     field :created_at, :timestamptz, default: "now()"
     field :updated_at, :timestamptz, default: "now()"
-    
+
     enable_rls()
-    
-    policy :select, "Published posts are public" do
+
+    policy :select, "Published posts are viewable by all" do
       "published = true"
     end
-    
-    policy :select, "Authors can see their own posts", for: :authenticated do
+
+    policy :select, "Authors can view their own posts" do
       "auth.uid() = author_id"
     end
-    
-    policy :insert, "Authors can create posts" do
+
+    policy :insert, "Authenticated users can create posts" do
       "auth.uid() = author_id"
     end
-    
-    policy :update, "Authors can edit their posts" do
+
+    policy :update, "Authors can update their own posts" do
       "auth.uid() = author_id"
     end
-    
-    policy :delete, "Authors can delete their posts" do
+
+    policy :delete, "Authors can delete their own posts" do
       "auth.uid() = author_id"
     end
-    
-    belongs_to :author, "users"
-    
-    index [:slug], unique: true
+
     index [:author_id]
-    index [:published, :published_at]
-    index [:created_at]
-    
-    trigger :update_updated_at, on: :update do
-      "updated_at = now()"
-    end
-    
-    trigger :generate_slug, on: [:insert, :update] do
-      """
-      IF NEW.slug IS NULL OR NEW.slug = '' THEN
-        NEW.slug = slugify(NEW.title);
-      END IF;
-      """
-    end
+    index [:published, :created_at]
+    index [:slug], unique: true
   end
 
-  # Custom database functions
-  function "slugify", [:text], :text do
-    """
-    DECLARE
-      result text;
-    BEGIN
-      result := lower(trim($1));
-      result := regexp_replace(result, '[^a-z0-9\\-_]+', '-', 'gi');
-      result := regexp_replace(result, '-{2,}', '-', 'g');
-      result := trim(result, '-');
-      RETURN result;
-    END;
-    """
-  end
+  # Categories for organizing posts
+  table "categories" do
+    field :id, :uuid, primary_key: true, default: "gen_random_uuid()"
+    field :name, :text, unique: true, null: false
+    field :description, :text
+    field :created_at, :timestamptz, default: "now()"
 
-  # Database views for complex queries
-  view "published_posts_with_authors" do
-    """
-    SELECT 
-      p.id, p.title, p.slug, p.excerpt, p.published_at,
-      u.name as author_name, u.avatar_url as author_avatar
-    FROM posts p
-    JOIN users u ON p.author_id = u.id  
-    WHERE p.published = true
-    ORDER BY p.published_at DESC
-    """
-  end
+    enable_rls()
 
-  # File storage buckets
-  storage_bucket "avatars" do
-    public true
-    file_size_limit "2MB"
-    allowed_mime_types ["image/jpeg", "image/png", "image/webp"]
-    
-    policy :select, "Avatars are publicly readable" do
+    policy :select, "Categories are publicly viewable" do
       "true"
     end
-    
-    policy :insert, "Users can upload their own avatar" do
-      "auth.uid()::text = (storage.foldername(name))[1]"
+
+    index [:name], unique: true
+  end
+
+  # Many-to-many relationship between posts and categories
+  table "post_categories" do
+    field :id, :uuid, primary_key: true, default: "gen_random_uuid()"
+    field :post_id, :uuid, references: "posts(id)", on_delete: :cascade
+    field :category_id, :uuid, references: "categories(id)", on_delete: :cascade
+    field :created_at, :timestamptz, default: "now()"
+
+    enable_rls()
+
+    policy :select, "Post categories follow post visibility" do
+      "EXISTS (SELECT 1 FROM posts WHERE id = post_id AND (published = true OR auth.uid() = author_id))"
     end
+
+    policy :insert, "Authors can categorize their posts" do
+      "EXISTS (SELECT 1 FROM posts WHERE id = post_id AND auth.uid() = author_id)"
+    end
+
+    policy :delete, "Authors can remove categories from their posts" do
+      "EXISTS (SELECT 1 FROM posts WHERE id = post_id AND auth.uid() = author_id)"
+    end
+
+    index [:post_id, :category_id], unique: true
+    index [:category_id]
+  end
+
+  # Comments on posts
+  table "comments" do
+    field :id, :uuid, primary_key: true, default: "gen_random_uuid()"
+    field :post_id, :uuid, references: "posts(id)", on_delete: :cascade
+    field :author_id, :uuid, references: "users(id)", on_delete: :cascade
+    field :content, :text, null: false
+    field :created_at, :timestamptz, default: "now()"
+    field :updated_at, :timestamptz, default: "now()"
+
+    enable_rls()
+
+    policy :select, "Comments are viewable on published posts" do
+      "EXISTS (SELECT 1 FROM posts WHERE id = post_id AND published = true)"
+    end
+
+    policy :insert, "Authenticated users can comment" do
+      "auth.uid() = author_id"
+    end
+
+    policy :update, "Users can update their own comments" do
+      "auth.uid() = author_id"
+    end
+
+    policy :delete, "Users can delete their own comments" do
+      "auth.uid() = author_id"
+    end
+
+    index [:post_id, :created_at]
+    index [:author_id]
   end
 end
 ```
@@ -216,16 +226,16 @@ end
 
 ```bash
 # Generate migration from schema changes
-tenjin generate initial_schema
-# or: nix run .#tenjin generate initial_schema
+mix tenjin.gen.migration initial_schema
+# or: nix run .#tenjin gen.migration initial_schema
 
 # Apply migrations to database  
-tenjin migrate
+mix tenjin.migrate
 # or: nix run .#tenjin migrate
 
-# Use database diff for incremental changes
-tenjin generate add_comments --diff
-# or: nix run .#tenjin generate add_comments --diff
+# Start Supabase development environment
+mix tenjin.supabase.start
+# or: nix run .#tenjin supabase.start
 ```
 
 ## Development Workflow
@@ -240,32 +250,23 @@ tenjin generate add_comments --diff
 
 ### Project Management
 ```bash
-tenjin new <project_name>    # Create new Tenjin project
-tenjin init                  # Initialize Tenjin in existing project
+mix tenjin.new <project_name>    # Create new Tenjin project
+mix tenjin.init                  # Initialize Tenjin in existing project
 ```
 
 ### Supabase Management
 ```bash
-tenjin start                 # Start local Supabase
-tenjin stop                  # Stop local Supabase
-tenjin status                # Check Supabase status  
-tenjin reset                 # Reset local database
+mix tenjin.supabase.start        # Start local Supabase
+mix tenjin.supabase.stop         # Stop local Supabase
+mix tenjin.supabase.status       # Check Supabase status  
+mix tenjin.supabase.reset        # Reset local database
 ```
 
 ### Schema & Migrations
 ```bash
-tenjin generate <name>       # Generate migration from schema
-tenjin migrate               # Apply pending migrations
-tenjin rollback              # Rollback last migration
-tenjin sql                   # Generate SQL from current schema
-```
-
-### Development
-```bash
-tenjin server                # Start development server
-tenjin console               # Interactive console  
-tenjin seed                  # Run database seeds
-tenjin validate              # Validate schema definitions
+mix tenjin.gen.migration <name>  # Generate migration from schema
+mix tenjin.migrate               # Apply pending migrations
+mix tenjin.migrate --local       # Apply to local database explicitly
 ```
 
 ## Testing
