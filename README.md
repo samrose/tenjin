@@ -286,9 +286,7 @@ cd my_project && mix test
 
 ## Examples
 
-- [Blog Example](examples/blog/) - Complete blog with users, posts, comments
-- [Todo App](examples/todo_app/) - Todo application with real-time features
-- [E-commerce](examples/ecommerce/) - Complex e-commerce schema
+- [Blog Example](examples/blog/) - Complete blog with users, posts, categories, and comments
 
 ## Documentation
 
@@ -342,7 +340,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/tenjin-framework/tenjin.git
+   git clone https://github.com/your-username/tenjin.git
    cd tenjin
    ```
 
