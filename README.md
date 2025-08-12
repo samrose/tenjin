@@ -291,6 +291,7 @@ cd my_project && mix test
 ## Documentation
 
 - [Schema DSL Reference](docs/schema_dsl.md) - Complete DSL documentation
+- [Advanced Features](docs/advanced_features.md) - Dynamic schemas, composition, and maintainability
 - [RLS Policies](docs/rls_policies.md) - Row Level Security guide
 - [Migration System](docs/migrations.md) - Migration workflow
 - [Testing Guide](docs/testing.md) - Testing your schemas
